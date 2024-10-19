@@ -10,37 +10,50 @@ from torch.utils.tensorboard import SummaryWriter
 # import torch.distributed as dist
 
 from utils.logger import Logger
-from network.models import MotionDiffusion
+from network.models import MotionDiffusion, StylelessMotionDiffusion
 from network.training import MotionTrainingPortal
-from network.dataset import MotionDataset
+from network.dataset import MotionDataset, StylelessMotionDataset
 
 from diffusion.create_diffusion import create_gaussian_diffusion
 from config.option import add_model_args, add_train_args, add_diffusion_args, config_parse
 
 def train(config, resume, logger, tb_writer):
-    
+    # Setup the seed and dtype for both torch and numpy
     common.fixseed(1024)
     np_dtype = common.select_platform(32)
     
+    # Setup the dataset
     print("Loading dataset..")
-    train_data = MotionDataset(config.data, config.arch.rot_req, 
+    # train_data = MotionDataset(config.data, config.arch.rot_req, 
+    #                               config.arch.offset_frame,  config.arch.past_frame, 
+    #                               config.arch.future_frame, dtype=np_dtype, limited_num=config.trainer.load_num)
+    train_data = StylelessMotionDataset(config.data, config.arch.rot_req, 
                                   config.arch.offset_frame,  config.arch.past_frame, 
                                   config.arch.future_frame, dtype=np_dtype, limited_num=config.trainer.load_num)
     train_dataloader = DataLoader(train_data, batch_size=config.trainer.batch_size, shuffle=True, num_workers=config.trainer.workers, drop_last=False, pin_memory=True)
     logger.info('\nTraining Dataset includins %d clip, with %d frame per clip;' % (len(train_data), config.arch.clip_len))
     
+    # Setup diffusion process
     diffusion = create_gaussian_diffusion(config)
     
     input_feats = (train_data.joint_num+1) * train_data.per_rot_feat   # use the root translation as an extra joint
 
-    model = MotionDiffusion(input_feats, len(train_data.style_set),
+    # Setup the model
+    # model = MotionDiffusion(input_feats, len(train_data.style_set),
+    #             train_data.joint_num+1, train_data.per_rot_feat, 
+    #             config.arch.rot_req, config.arch.clip_len,
+    #             config.arch.latent_dim, config.arch.ff_size, 
+    #             config.arch.num_layers, config.arch.num_heads, 
+    #             arch=config.arch.decoder, cond_mask_prob=config.trainer.cond_mask_prob, device=config.device).to(config.device)
+    model = StylelessMotionDiffusion(input_feats,
                 train_data.joint_num+1, train_data.per_rot_feat, 
                 config.arch.rot_req, config.arch.clip_len,
                 config.arch.latent_dim, config.arch.ff_size, 
                 config.arch.num_layers, config.arch.num_heads, 
                 arch=config.arch.decoder, cond_mask_prob=config.trainer.cond_mask_prob, device=config.device).to(config.device)
+    logger.info('\nModel structure: \n%s' % str(model))
     
-    # logger.info('\nModel structure: \n%s' % str(model))
+    # Setup the training portal and start training
     trainer = MotionTrainingPortal(config, model, diffusion, train_dataloader, logger, tb_writer)
     
     if resume is not None:
@@ -53,6 +66,7 @@ def train(config, resume, logger, tb_writer):
 
 
 if __name__ == '__main__':
+    # At first setup things like config, arguments, logger, tensorboard writer, etc.
     start_time = time.time()
     
     parser = argparse.ArgumentParser(description='### Generative Locamotion Training')
@@ -113,6 +127,7 @@ if __name__ == '__main__':
         f.write(str(config))
     f.close() 
     
+    # Start training
     logger.info('\Generative locamotion training with config: \n%s' % config)
     train(config, args.resume, logger, tb_writer)
     logger.info('\nTotal training time: %s mins' % ((time.time() - start_time) / 60))

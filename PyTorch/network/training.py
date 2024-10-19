@@ -59,6 +59,7 @@ class BaseTrainingPortal:
     
         
     def run_loop(self):
+        # initially sample one sequence for testing
         sampling_num = 16
         sampling_idx = np.random.randint(0, len(self.dataloader.dataset), sampling_num)
         sampling_subset = DataLoader(Subset(self.dataloader.dataset, sampling_idx), batch_size=sampling_num)
@@ -73,9 +74,16 @@ class BaseTrainingPortal:
             
             data_len = len(self.dataloader)
             
+            # one epoch of training:
+            # 1. sample a batch of data
+            # 2. sample a batch of timesteps
+            # 3. calculate the loss of diffusion
+            # 4. backpropagate the loss
             for datas in self.dataloader:
+                # retrieve data dict from datas
                 datas = {key: val.to(self.device) if torch.is_tensor(val) else val for key, val in datas.items()}
                 cond = {key: val.to(self.device) if torch.is_tensor(val) else val for key, val in datas['conditions'].items()}
+                # future motion
                 x_start = datas['data']
 
                 self.opt.zero_grad()
@@ -95,6 +103,7 @@ class BaseTrainingPortal:
                             epoch_losses[key_name] = []
                         epoch_losses[key_name].append(losses[key_name].mean().item())
             
+            # default prior_loader is None
             if self.prior_loader is not None:
                 for prior_datas in itertools.islice(self.prior_loader, data_len):
                     prior_datas = {key: val.to(self.device) if torch.is_tensor(val) else val for key, val in prior_datas.items()}
@@ -115,6 +124,7 @@ class BaseTrainingPortal:
                                 epoch_losses[key_name] = []
                             epoch_losses[key_name].append(prior_losses[key_name].mean().item())
             
+            # format the loss str to be output
             loss_str = ''
             for key in epoch_losses.keys():
                 loss_str += f'{key}: {np.mean(epoch_losses[key]):.6f}, '
@@ -129,7 +139,8 @@ class BaseTrainingPortal:
             
             epoch_process_bar.set_description(f'Epoch {epoch_idx}/{self.config.trainer.epoch} | loss: {epoch_avg_loss:.6f} | best_loss: {self.best_loss:.6f}')
             self.logger.info(f'Epoch {epoch_idx}/{self.config.trainer.epoch} | {loss_str} | best_loss: {self.best_loss:.6f}')
-                        
+            
+            # save the model and evaluate the sampling during the training, the frequency is controlled by self.config.trainer.save_freq
             if epoch_idx > 0 and epoch_idx % self.config.trainer.save_freq == 0:
                 self.save_checkpoint(filename=f'weights_{epoch_idx}')
                 self.evaluate_sampling(sampling_subset, save_folder_name='train_samples')
@@ -178,6 +189,7 @@ class BaseTrainingPortal:
 
 
 class MotionTrainingPortal(BaseTrainingPortal):
+    # the finetune_loader is passed to prior_loader in Base Training Portal
     def __init__(self, config, model, diffusion, dataloader, logger, tb_writer, finetune_loader=None):
         super().__init__(config, model, diffusion, dataloader, logger, tb_writer, finetune_loader)
         self.skel_offset = torch.from_numpy(self.dataloader.dataset.T_pose.offsets).to(self.device)
@@ -191,6 +203,7 @@ class MotionTrainingPortal(BaseTrainingPortal):
         if noise is None:
             noise = th.randn_like(x_start)
         
+        # x_start is the gt, which means it is the x_0. x_t is the noised latent space motion
         x_t = self.diffusion.q_sample(x_start, t, noise=noise)
         
         # [bs, joint_num, joint_feat, future_frames]
@@ -200,6 +213,7 @@ class MotionTrainingPortal(BaseTrainingPortal):
         
         model_output = self.model.interface(x_t, self.diffusion._scale_timesteps(t), cond)
         
+        # compute the loss
         if return_loss:
             loss_terms = {}
             
@@ -302,4 +316,3 @@ class MotionTrainingPortal(BaseTrainingPortal):
             T_pose_template.positions = np.zeros((rotations[samplie_idx].shape[0], T_pose_template.positions.shape[1], T_pose_template.positions.shape[2]))
             T_pose_template.positions[:, 0] = root_pos[samplie_idx]
             T_pose_template.export(f'{save_path}/motion_{samplie_idx}.{prefix}.bvh', save_ori_scal=True)  
-        

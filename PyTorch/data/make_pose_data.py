@@ -11,6 +11,12 @@ from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 from utils.bvh_motion import Motion
 
+import argparse
+
+parser = argparse.ArgumentParser(description='### Make pose data')
+parser.add_argument('-r', '--root', default='data/100STYLE_mixamo', type=str, help='The root folder of the dataset')
+parser.add_argument('-o', '--output', default='data/pkls/100style.pkl', type=str, help='The output filename')
+
 
 def load_contact(contact_path):
     contacts = []
@@ -72,10 +78,14 @@ def process_motion(motion, use_scale=True):
     }
 
 if __name__ == '__main__':
-    
-    data_root = 'data/100STYLE_mixamo'
+    cfg = parser.parse_args()
+    data_root = cfg.root
     process_batch = os.path.join(data_root, 'simple')
-    export_path = 'data/pkls/100style.pkl'
+    export_path = 'data/pkls'
+    exprot_filename = '100style.pkl'
+    if not os.path.exists(export_path):
+        os.makedirs(export_path)
+    export_path = os.path.join(export_path, exprot_filename)
     style_metas = style100.get_info(data_root, meta_file='Dataset_List.csv')
     
     data_list = {

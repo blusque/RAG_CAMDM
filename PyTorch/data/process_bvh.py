@@ -15,6 +15,14 @@ import style_helper as style100
 from multiprocessing import Pool
 from utils.bvh_motion import Motion
 
+import argparse
+
+NEEDED_STYLE = ['neutral']
+
+parser = argparse.ArgumentParser(description='### Process BVH files')
+parser.add_argument('-d', '--dir', default='data/100STYLE_mixamo/raw', type=str, help='The directory of BVH files')
+parser.add_argument('-o', '--output', default='data/100STYLE_mixamo/simple', type=str, help='The output directory of processed BVH files')
+
 def process_bvh(bvh_path, output_path):
     raw_motion = Motion.load_bvh(bvh_path)
     raw_motion.offsets[0].fill(0)
@@ -30,14 +38,15 @@ def process_bvh(bvh_path, output_path):
 
 
 if __name__ == '__main__':
-    
-    process_folder = 'data/100STYLE_mixamo/raw'
-    output_folder = 'data/100STYLE_mixamo/simple'
+    cfg = parser.parse_args()
+    process_folder = cfg.dir
+    output_folder = cfg.output
 
     bvh_paths = []
     for root, dirs, files in os.walk(process_folder):
         for file in files:
-            if file.endswith('.bvh'):
+            style_name = file.lower().split('_')[0]
+            if file.endswith('.bvh') and style_name in NEEDED_STYLE:
                 bvh_paths.append(os.path.join(root, file))
                 
     output_paths = [f.replace(process_folder, output_folder) for f in bvh_paths]

@@ -1,0 +1,17 @@
+PyTorch/save/
+PyTorch/data/pkls/
+*/__pycache__/
+*/.ipynb_checkpoints/
+*/.vscode/
+*/.idea/
+*/.pytest_cache/
+*/.mypy_cache/
+*/.mypy/
+*/.git/
+*/.gitignore
+*/.gitattributes
+*/.gitmodules
+*/.gitkeep
+*/.gitlab-ci.yml
+*/.gitlab/
+*/.github/

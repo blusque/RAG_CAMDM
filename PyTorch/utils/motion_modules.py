@@ -218,8 +218,8 @@ if __name__ == '__main__':
     
     # mirror
     names = motion.names
-    l_names = sorted([val for val in names if val.lower()[0] is 'l'])
-    r_names = sorted([val for val in names if (val.lower()[0] is 'r' and val.lower() != 'root')])
+    l_names = sorted([val for val in names if val.lower()[0] == 'l'])
+    r_names = sorted([val for val in names if (val.lower()[0] == 'r' and val.lower() != 'root')])
     l_joint_idxs, r_joint_idxs = [names.index(name) for name in l_names], [names.index(name) for name in r_names]
     motion_mirror = mirror(motion.copy(), l_joint_idxs, r_joint_idxs)
     # motion_mirror.export('vis/module_test/mirror.bvh')
