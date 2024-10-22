@@ -187,15 +187,16 @@ class StylelessMotionDiffusion(nn.Module):
         
         time_emb = self.embed_timestep(timesteps)  # [1, bs, L]
         # style_emb = self.embed_style(style_idx).unsqueeze(0)  # [1, bs, L]
-        style_emb = torch.zeros_like(time_emb).to(self.device)
         traj_trans_emb = self.traj_trans_process(traj_trans) # [N/2, bs, L] 
         traj_pose_emb = self.traj_pose_process(traj_pose) # [N/2, bs, L] 
         past_motion_emb = self.past_motion_process(past_motion)  # [past_frames, bs, L] 
         
         future_motion_emb = self.future_motion_process(x) 
         
-        xseq = torch.cat((time_emb, style_emb, 
-                          traj_trans_emb, traj_pose_emb,
+        # xseq = torch.cat((time_emb, style_emb, 
+        #                   traj_trans_emb, traj_pose_emb,
+        #                   past_motion_emb, future_motion_emb), axis=0)
+        xseq = torch.cat((time_emb, traj_trans_emb, traj_pose_emb,
                           past_motion_emb, future_motion_emb), axis=0)
         
         xseq = self.sequence_pos_encoder(xseq)

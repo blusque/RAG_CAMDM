@@ -45,6 +45,8 @@ if __name__ == '__main__':
     bvh_paths = []
     for root, dirs, files in os.walk(process_folder):
         for file in files:
+            # if file.endswith('.bvh'):
+            #     bvh_paths.append(os.path.join(root, file))
             style_name = file.lower().split('_')[0]
             if file.endswith('.bvh') and style_name in NEEDED_STYLE:
                 bvh_paths.append(os.path.join(root, file))

@@ -14,6 +14,7 @@ def add_model_args(parser):
     parser.add_argument('--future_frame', type=int, help='The number of future frames for a training clip. Use 0 for a random number.')
     parser.add_argument('--local_cond', default=None, type=str, help='Local conditioning.')
     parser.add_argument('--global_cond', default=None, type=str, help='Global conditioning.')
+    parser.add_argument('--full_style', type=bool, help='Whether training with full styles?')
 
 
 def add_diffusion_args(parser):
@@ -52,6 +53,7 @@ def config_parse(args):
     config.arch.clip_len = config.arch.past_frame + config.arch.future_frame
     config.arch.local_cond = str(args.local_cond) if args.local_cond is not None else config.arch.local_cond
     config.arch.global_cond = str(args.global_cond) if args.global_cond is not None else config.arch.global_cond
+    config.arch.full_style = True if args.full_style else config.arch.full_style
         
     config.diff.noise_schedule = str(args.noise_schedule) if args.noise_schedule is not None else config.diff.noise_schedule
     config.diff.diffusion_steps = int(args.diffusion_steps) if args.diffusion_steps is not None else config.diff.diffusion_steps

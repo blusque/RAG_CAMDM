@@ -24,12 +24,16 @@ def train(config, resume, logger, tb_writer):
     
     # Setup the dataset
     print("Loading dataset..")
-    # train_data = MotionDataset(config.data, config.arch.rot_req, 
-    #                               config.arch.offset_frame,  config.arch.past_frame, 
-    #                               config.arch.future_frame, dtype=np_dtype, limited_num=config.trainer.load_num)
-    train_data = StylelessMotionDataset(config.data, config.arch.rot_req, 
-                                  config.arch.offset_frame,  config.arch.past_frame, 
-                                  config.arch.future_frame, dtype=np_dtype, limited_num=config.trainer.load_num)
+    if config.arch.full_style:
+        print("Loading MotionDataset...")
+        train_data = MotionDataset(config.data, config.arch.rot_req, 
+                                    config.arch.offset_frame,  config.arch.past_frame, 
+                                    config.arch.future_frame, dtype=np_dtype, limited_num=config.trainer.load_num)
+    else:
+        print("Loading StylelessMotionDataset...")
+        train_data = StylelessMotionDataset(config.data, config.arch.rot_req, 
+                                    config.arch.offset_frame,  config.arch.past_frame, 
+                                    config.arch.future_frame, dtype=np_dtype, limited_num=config.trainer.load_num)
     train_dataloader = DataLoader(train_data, batch_size=config.trainer.batch_size, shuffle=True, num_workers=config.trainer.workers, drop_last=False, pin_memory=True)
     logger.info('\nTraining Dataset includins %d clip, with %d frame per clip;' % (len(train_data), config.arch.clip_len))
     
@@ -39,19 +43,23 @@ def train(config, resume, logger, tb_writer):
     input_feats = (train_data.joint_num+1) * train_data.per_rot_feat   # use the root translation as an extra joint
 
     # Setup the model
-    # model = MotionDiffusion(input_feats, len(train_data.style_set),
-    #             train_data.joint_num+1, train_data.per_rot_feat, 
-    #             config.arch.rot_req, config.arch.clip_len,
-    #             config.arch.latent_dim, config.arch.ff_size, 
-    #             config.arch.num_layers, config.arch.num_heads, 
-    #             arch=config.arch.decoder, cond_mask_prob=config.trainer.cond_mask_prob, device=config.device).to(config.device)
-    model = StylelessMotionDiffusion(input_feats,
-                train_data.joint_num+1, train_data.per_rot_feat, 
-                config.arch.rot_req, config.arch.clip_len,
-                config.arch.latent_dim, config.arch.ff_size, 
-                config.arch.num_layers, config.arch.num_heads, 
-                arch=config.arch.decoder, cond_mask_prob=config.trainer.cond_mask_prob, device=config.device).to(config.device)
-    logger.info('\nModel structure: \n%s' % str(model))
+    if config.arch.full_style:
+        print("Loading MotionDiffusion...")
+        model = MotionDiffusion(input_feats, len(train_data.style_set),
+                    train_data.joint_num+1, train_data.per_rot_feat, 
+                    config.arch.rot_req, config.arch.clip_len,
+                    config.arch.latent_dim, config.arch.ff_size, 
+                    config.arch.num_layers, config.arch.num_heads, 
+                    arch=config.arch.decoder, cond_mask_prob=config.trainer.cond_mask_prob, device=config.device).to(config.device)
+    else:
+        print("Loading StylelessMotionDiffusion...")
+        model = StylelessMotionDiffusion(input_feats,
+                    train_data.joint_num+1, train_data.per_rot_feat, 
+                    config.arch.rot_req, config.arch.clip_len,
+                    config.arch.latent_dim, config.arch.ff_size, 
+                    config.arch.num_layers, config.arch.num_heads, 
+                    arch=config.arch.decoder, cond_mask_prob=config.trainer.cond_mask_prob, device=config.device).to(config.device)
+    # logger.info('\nModel structure: \n%s' % str(model))
     
     # Setup the training portal and start training
     trainer = MotionTrainingPortal(config, model, diffusion, train_dataloader, logger, tb_writer)
