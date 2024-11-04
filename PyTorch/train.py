@@ -19,7 +19,7 @@ from config.option import add_model_args, add_train_args, add_diffusion_args, co
 
 def train(config, resume, logger, tb_writer):
     # Setup the seed and dtype for both torch and numpy
-    common.fixseed(1024)
+    common.fixseed(2020)
     np_dtype = common.select_platform(32)
     
     # Setup the dataset

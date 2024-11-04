@@ -1,0 +1,3 @@
+[submodule "MotionCLIP"]
+	path = MotionCLIP
+	url = https://github.com/GuyTevet/MotionCLIP.git

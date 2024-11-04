@@ -13,6 +13,8 @@ from torch_ema import ExponentialMovingAverage
 from diffusion.resample import create_named_schedule_sampler
 from diffusion.gaussian_diffusion import *
 
+from stylization import assign_adain_params, AdaptiveInstanceNorm1d
+
 
 class BaseTrainingPortal:
     def __init__(self, config, model, diffusion, dataloader, logger, tb_writer, prior_loader=None):
@@ -51,7 +53,7 @@ class BaseTrainingPortal:
         self.prior_loader = prior_loader
         
         
-    def diffuse(self, x_start, t, cond, noise=None, return_loss=False):
+    def diffuse(self, x_start, style, t, cond, noise=None, return_loss=False):
         raise NotImplementedError('diffuse function must be implemented')
 
     def evaluate_sampling(self, dataloader, save_folder_name):
@@ -196,7 +198,7 @@ class MotionTrainingPortal(BaseTrainingPortal):
         self.skel_parents = self.dataloader.dataset.T_pose.parents
         
 
-    def diffuse(self, x_start, t, cond, noise=None, return_loss=False):
+    def diffuse(self, x_start, style, t, cond, noise=None, return_loss=False):
         batch_size, frame_num, joint_num, joint_feat = x_start.shape
         x_start = x_start.permute(0, 2, 3, 1)
         
@@ -272,13 +274,173 @@ class MotionTrainingPortal(BaseTrainingPortal):
                     loss_terms["loss_foot_contact"] = self.diffusion.masked_l2(pred_vel,
                                                 torch.zeros(pred_vel.shape, device=pred_vel.device),
                                                 mask[:, :, :, 1:])
-            
+
             loss_terms["loss"] = loss_terms.get('vb', 0.) + \
                             loss_terms.get('loss_data', 0.) + \
                             loss_terms.get('loss_data_vel', 0.) + \
                             loss_terms.get('loss_geo_xyz', 0) + \
                             loss_terms.get('loss_geo_xyz_vel', 0) + \
                             loss_terms.get('loss_foot_contact', 0)
+            
+            return model_output.permute(0, 3, 1, 2), loss_terms
+        
+        return model_output.permute(0, 3, 1, 2)
+        
+    
+    def evaluate_sampling(self, dataloader, save_folder_name):
+        self.model.eval()
+        self.model.training = False
+        common.mkdir('%s/%s' % (self.save_dir, save_folder_name))
+        
+        datas = next(iter(dataloader)) 
+        datas = {key: val.to(self.device) if torch.is_tensor(val) else val for key, val in datas.items()}
+        cond = {key: val.to(self.device) if torch.is_tensor(val) else val for key, val in datas['conditions'].items()}
+        x_start = datas['data']
+        t, _ = self.schedule_sampler.sample(dataloader.batch_size, self.device)
+        with torch.no_grad():
+            model_output = self.diffuse(x_start, t, cond, noise=None, return_loss=False)
+        
+        common_past_motion = cond['past_motion'].permute(0, 3, 1, 2)
+        self.export_samples(x_start, common_past_motion, '%s/%s/' % (self.save_dir, save_folder_name), 'gt')
+        self.export_samples(model_output, common_past_motion, '%s/%s/' % (self.save_dir, save_folder_name), 'pred')
+        
+        self.logger.info(f'Evaluate the sampling {save_folder_name} at epoch {self.epoch}')
+        
+
+    def export_samples(self, future_motion_feature, past_motion_feature, save_path, prefix):
+        motion_feature = torch.cat((past_motion_feature, future_motion_feature), dim=1)
+        rotations = nn_transforms.repr6d2quat(motion_feature[:, :, :-1]).cpu().numpy()
+        root_pos = motion_feature[:, :, -1, :3].cpu().numpy()
+        
+        for samplie_idx in range(future_motion_feature.shape[0]):
+            T_pose_template = self.dataloader.dataset.T_pose.copy()
+            T_pose_template.rotations = rotations[samplie_idx]
+            T_pose_template.positions = np.zeros((rotations[samplie_idx].shape[0], T_pose_template.positions.shape[1], T_pose_template.positions.shape[2]))
+            T_pose_template.positions[:, 0] = root_pos[samplie_idx]
+            T_pose_template.export(f'{save_path}/motion_{samplie_idx}.{prefix}.bvh', save_ori_scal=True)  
+
+
+class StylizeTrainingPortal(BaseTrainingPortal):
+    # the finetune_loader is passed to prior_loader in Base Training Portal
+    def __init__(self, config, model, diffusion, dataloader, logger, tb_writer, finetune_loader=None, 
+                 style_encoder=None, content_encoder=None, style_mlp=None, motion_encoder=None, traj_encoder=None):
+        super().__init__(config, model, diffusion, dataloader, logger, tb_writer, finetune_loader)
+        self.skel_offset = torch.from_numpy(self.dataloader.dataset.T_pose.offsets).to(self.device)
+        self.skel_parents = self.dataloader.dataset.T_pose.parents
+        self.style_encoder = style_encoder
+        self.content_encoder = content_encoder
+        self.style_mlp = style_mlp
+        self.adain = AdaptiveInstanceNorm1d(config.latent_dim)
+        self.motion_encoder = motion_encoder
+        self.traj_encoder = traj_encoder
+        
+
+    def diffuse(self, x_start, style, t, cond, noise=None, return_loss=False):
+        batch_size, frame_num, joint_num, joint_feat = x_start.shape
+        x_start = x_start.permute(0, 2, 3, 1)
+        
+        if noise is None:
+            noise = th.randn_like(x_start)
+
+        style_code = self.style_encoder(style)
+        style_adain = self.style_mlp(style_code)
+        assign_adain_params(style_adain, self.adain)
+        
+        # x_start is the gt, which means it is the x_0. x_t is the noised latent space motion
+        x_t = self.diffusion.q_sample(x_start, t, noise=noise)
+        
+        # [bs, joint_num, joint_feat, future_frames]
+        cond['past_motion'] = cond['past_motion'].permute(0, 2, 3, 1) # [bs, joint_num, joint_feat, past_frames]
+        cond['traj_pose'] = cond['traj_pose'].permute(0, 2, 1) # [bs, 6, frame_num//2]
+        cond['traj_trans'] = cond['traj_trans'].permute(0, 2, 1) # [bs, 2, frame_num//2]
+        
+        # CFG on past motion
+        keep_batch_idx = torch.rand(batch_size, device=past_motion.device) < (1 - self.cond_mask_prob)
+        past_motion = past_motion * keep_batch_idx.view((batch_size, 1, 1, 1))
+
+        traj_emb = self.traj_encoder(cond['traj_trans'], cond['traj_pose'])
+        motion_emb = self.motion_encoder(x_t, cond['past_motion'])
+        motion_emb = self.adain(motion_emb)
+
+        model_output = self.model(t, traj_emb, motion_emb, frame_num)
+        
+        # compute the loss
+        if return_loss:
+            loss_terms = {}
+            
+            if self.diffusion.model_var_type in [ModelVarType.LEARNED,  ModelVarType.LEARNED_RANGE]:
+                B, C = x_t.shape[:2]
+                assert model_output.shape == (B, C * 2, *x_t.shape[2:])
+                model_output, model_var_values = torch.split(model_output, C, dim=1)
+                frozen_out = torch.cat([model_output.detach(), model_var_values], dim=1)
+                loss_terms["vb"] = self.diffusion._vb_terms_bpd(model=lambda *args, r=frozen_out: r, x_start=x_start, x_t=x_t, t=t, clip_denoised=False)["output"]
+                if self.loss_type == LossType.RESCALED_MSE:
+                    loss_terms["vb"] *= self.diffusion.num_timesteps / 1000.0
+            target = {
+                ModelMeanType.PREVIOUS_X: self.diffusion.q_posterior_mean_variance(x_start=x_start, x_t=x_t, t=t)[0],
+                ModelMeanType.START_X: x_start,
+                ModelMeanType.EPSILON: noise,
+            }[self.diffusion.model_mean_type]
+            assert model_output.shape == target.shape == x_start.shape
+            mask = cond['mask'].view(batch_size, 1, 1, -1)
+            
+            if self.config.trainer.use_loss_mse:
+                loss_terms['loss_data'] = self.diffusion.masked_l2(target, model_output, mask) # mean_flat(rot_mse)
+                
+            if self.config.trainer.use_loss_vel:
+                model_output_vel = model_output[..., 1:] - model_output[..., :-1]
+                target_vel = target[..., 1:] - target[..., :-1]
+                loss_terms['loss_data_vel'] = self.diffusion.masked_l2(target_vel[:, :-1], model_output_vel[:, :-1], mask[..., 1:])
+                  
+            if self.config.trainer.use_loss_3d or self.config.use_loss_contact:
+                target_rot, pred_rot, past_rot = target.permute(0, 3, 1, 2), model_output.permute(0, 3, 1, 2), cond['past_motion'].permute(0, 3, 1, 2)
+                target_root_pos, pred_root_pos, past_root_pos = target_rot[:, :, -1, :3], pred_rot[:, :, -1, :3], past_rot[:, :, -1, :3]
+                skeletons = self.skel_offset.unsqueeze(0).expand(batch_size, -1, -1)
+                parents = self.skel_parents[None]
+                
+                target_xyz = neural_FK(target_rot[:, :, :-1], skeletons, target_root_pos, parents, rotation_type=self.config.arch.rot_req)
+                pred_xyz = neural_FK(pred_rot[:, :, :-1], skeletons, pred_root_pos, parents, rotation_type=self.config.arch.rot_req)
+                
+                if self.config.trainer.use_loss_3d:
+                    loss_terms["loss_geo_xyz"] = self.diffusion.masked_l2(target_xyz.permute(0, 2, 3, 1), pred_xyz.permute(0, 2, 3, 1), mask)
+                
+                if self.config.trainer.use_loss_vel and self.config.trainer.use_loss_3d:
+                    target_xyz_vel = target_xyz[:, 1:] - target_xyz[:, :-1]
+                    pred_xyz_vel = pred_xyz[:, 1:] - pred_xyz[:, :-1]
+                    loss_terms["loss_geo_xyz_vel"] = self.diffusion.masked_l2(target_xyz_vel.permute(0, 2, 3, 1), pred_xyz_vel.permute(0, 2, 3, 1), mask[..., 1:])
+                
+                if self.config.trainer.use_loss_contact:
+                    l_foot_idx, r_foot_idx = 24, 19
+                    relevant_joints = [l_foot_idx, r_foot_idx]
+                    target_xyz_reshape = target_xyz.permute(0, 2, 3, 1)  
+                    pred_xyz_reshape = pred_xyz.permute(0, 2, 3, 1)
+                    gt_joint_xyz = target_xyz_reshape[:, relevant_joints, :, :]  # [BatchSize, 2, 3, Frames]
+                    gt_joint_vel = torch.linalg.norm(gt_joint_xyz[:, :, :, 1:] - gt_joint_xyz[:, :, :, :-1], axis=2)  # [BatchSize, 4, Frames]
+                    fc_mask = torch.unsqueeze((gt_joint_vel <= 0.01), dim=2).repeat(1, 1, 3, 1)
+                    pred_joint_xyz = pred_xyz_reshape[:, relevant_joints, :, :]  # [BatchSize, 2, 3, Frames]
+                    pred_vel = pred_joint_xyz[:, :, :, 1:] - pred_joint_xyz[:, :, :, :-1]
+                    pred_vel[~fc_mask] = 0
+                    loss_terms["loss_foot_contact"] = self.diffusion.masked_l2(pred_vel,
+                                                torch.zeros(pred_vel.shape, device=pred_vel.device),
+                                                mask[:, :, :, 1:])
+                    
+            if self.config.trainr.use_content_loss:
+                tgt_content_code = self.content_encoder(x_start)
+                pred_content_code = self.content_encoder(model_output)
+                loss_terms['content'] = 1 - torch.cosine_similarity(tgt_content_code, pred_content_code)
+                    
+            if self.config.trainer.use_style_loss:
+                tgt_style_code = style_code
+                pred_style_code = self.style_encoder(model_output)
+                loss_terms["style"] = 1 - torch.cosine_similarity(tgt_style_code, pred_style_code)
+
+            loss_terms["loss"] = loss_terms.get('vb', 0.) + \
+                            loss_terms.get('loss_data', 0.) + \
+                            loss_terms.get('loss_data_vel', 0.) + \
+                            loss_terms.get('loss_geo_xyz', 0) + \
+                            loss_terms.get('loss_geo_xyz_vel', 0) + \
+                            loss_terms.get('loss_foot_contact', 0) + \
+                            loss_terms.get('style', 0)
             
             return model_output.permute(0, 3, 1, 2), loss_terms
         

@@ -972,3 +972,10 @@ def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
     Retrieved from http://arxiv.org/abs/1812.07035
     """
     return matrix[..., :2, :].clone().reshape(*matrix.size()[:-2], 6)
+
+
+def align_trajectory_with_direction(trajectory: torch.Tensor, rotations: torch.Tensor, direction: torch.Tensor=torch.tensor([0, 1]), frame_idx=0,)
+
+
+def trajectory_diff(trajectory1: torch.Tensor, trajectory2: torch.Tensor):
+

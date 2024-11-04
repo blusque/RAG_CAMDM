@@ -15,6 +15,10 @@ def add_model_args(parser):
     parser.add_argument('--local_cond', default=None, type=str, help='Local conditioning.')
     parser.add_argument('--global_cond', default=None, type=str, help='Global conditioning.')
     parser.add_argument('--full_style', type=bool, help='Whether training with full styles?')
+    parser.add_argument('--enc_channels', type=list, help='The channels of style encoder')
+    parser.add_argument('--enc_kernel_size', type=int, help='The kernel size of style encoder')
+    parser.add_argument('--enc_stride', type=int, help='The stride of style encoder')
+    parser.add_argument('--mlp_dims', type=list, help='Dimensions of MLP model')
 
 
 def add_diffusion_args(parser):
@@ -74,6 +78,8 @@ def config_parse(args):
     config.trainer.use_loss_contact = True if loss_terms[3] == '1' else False
     config.trainer.load_num = -1
     config.trainer.save_freq = int(config.trainer.epoch // 10)
+
+    config.stylizer
 
     data_prefix = args.data.split('/')[-1].split('.')[0]
     config.save = '%s/%s_%s' % (args.save, args.name, data_prefix) if 'debug' not in config.name else '%s/%s' % (args.save, args.name)

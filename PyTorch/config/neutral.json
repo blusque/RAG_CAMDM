@@ -11,7 +11,11 @@
         "future_frame": 45,
         "local_cond": "traj",
         "global_cond": "style",
-        "full_style": false
+        "full_style": false,
+        "enc_channels": [0, 96, 144],
+        "enc_kernel_size": 8,
+        "enc_stride": 1,
+        "mlp_dims": [144, 192, 256]
     },
     "diff": {
         "noise_schedule": "cosine",

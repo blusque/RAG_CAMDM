@@ -18,6 +18,9 @@ from utils.bvh_motion import Motion
 import argparse
 
 NEEDED_STYLE = ['neutral']
+styles = ["Angry", "Crouched", "Depressed", "Neutral", "Old", "Proud", "Skip", "Strutting", "Aeroplane", "Cat", "Chicken", "Dinosaur", "Fairy", "Monk", "Morris", "Penguin",
+    "Quail", "Roadrunner", "Robot", "Rocket", "Star", "Superman", "Zombie", "Balance", "Heavyset", "Old", "Rushed", "Stif", "CrowdAvoidance", "InTheDark", "LawnMower", "OnHeels", 
+    "OnPhoneLeft", "OnPhoneRight", "OnToesBentForward", "OnToesCrouched", "Rushed"]
 
 parser = argparse.ArgumentParser(description='### Process BVH files')
 parser.add_argument('-d', '--dir', default='data/100STYLE_mixamo/raw', type=str, help='The directory of BVH files')
@@ -47,8 +50,8 @@ if __name__ == '__main__':
         for file in files:
             # if file.endswith('.bvh'):
             #     bvh_paths.append(os.path.join(root, file))
-            style_name = file.lower().split('_')[0]
-            if file.endswith('.bvh') and style_name in NEEDED_STYLE:
+            style_name = file.split('_')[0]
+            if file.endswith('.bvh') and style_name in styles:
                 bvh_paths.append(os.path.join(root, file))
                 
     output_paths = [f.replace(process_folder, output_folder) for f in bvh_paths]
